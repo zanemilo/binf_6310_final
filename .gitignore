@@ -107,5 +107,7 @@ CMakeFiles/
 CMakeCache.txt
 Makefile
 
-
+# R
+*.RData
+*.Rhistory
 
