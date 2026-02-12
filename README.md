@@ -19,23 +19,14 @@
 - [pip](https://pypi.org/project/pip/)
 - [r 4.3+](https://www.r-project.org/)
 - [FastQC](https://www.bioinformatics.babraham.ac.uk/projects/fastqc/)
-  
-### packages
-
 - [SRA Toolkit](https://github.com/ncbi/sra-tools)
 - [STAR v2.7.6a](https://github.com/alexdobin/STAR)
-- [Subread](https://github.com/ShiLab-Bioinformatics/subread)
+
+### packages
+
 - [DESeq2 v1.45.0](https://github.com/thelovelab/DESeq2)
 - [dplyr v1.1.4](https://github.com/tidyverse/dplyr)
-- [Rtsne v0.17](https://github.com/jkrijthe/Rtsne)
 - [ggplot2 v3.5.1](https://github.com/tidyverse/ggplot2)
-
-
-## Purpose:
-
-TBD
-
-
 
 
 
