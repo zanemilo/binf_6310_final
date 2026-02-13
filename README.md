@@ -18,6 +18,7 @@
 - [python 3.10+](https://www.python.org/downloads/)
 - [pip](https://pypi.org/project/pip/)
 - [r 4.3+](https://www.r-project.org/)
+- [Conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html)
 - [FastQC](https://www.bioinformatics.babraham.ac.uk/projects/fastqc/)
 - [SRA Toolkit](https://github.com/ncbi/sra-tools)
 - [STAR v2.7.6a](https://github.com/alexdobin/STAR)
