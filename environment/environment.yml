@@ -1,0 +1,12 @@
+name: venv_conda
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python
+  - star
+  - sra-tools
+  - samtools
+  - fastqc
+  - subread
