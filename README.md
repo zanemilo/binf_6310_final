@@ -22,13 +22,11 @@
 - [FastQC](https://www.bioinformatics.babraham.ac.uk/projects/fastqc/)
 - [SRA Toolkit](https://github.com/ncbi/sra-tools)
 - [STAR v2.7.6a](https://github.com/alexdobin/STAR)
-
-### packages
-
 - [DESeq2 v1.45.0](https://github.com/thelovelab/DESeq2)
 - [dplyr v1.1.4](https://github.com/tidyverse/dplyr)
 - [ggplot2 v3.5.1](https://github.com/tidyverse/ggplot2)
 
+Please see environment/README.md for guide on installing/setting up environment for Linux distro.
 
 
 ### License:
