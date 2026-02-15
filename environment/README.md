@@ -213,15 +213,3 @@ git pull origin master
 
 If you are wanting to make updates to the repo, we can add a working with git guide somewhere.
 
-### Notes
-
-* If you already created the env and just want to update it:
-
-  ```bash
-  conda env update -f env/environment.yml --prune
-  ```
-
-* The `prefix:` field (machine-specific path) should NOT be in a shared `environment.yml`.
-
-```
-
