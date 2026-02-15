@@ -10,3 +10,4 @@ dependencies:
   - samtools
   - fastqc
   - subread
+  - r-base
