@@ -167,6 +167,8 @@ conda env create -f environment/environment.yml
 conda activate venv_conda  ## NOTE: venv_conda is the name of the environment, pulled from environment.yml
 ```
 
+Note: conda activate venv_conda will activate the 'container' for all of the softwares to be installed within. When you activate the environemnt in the shell, (venv_conda) should appear as the pre-fix for your command line prompt.
+
 Verify install:
 
 ```bash
