@@ -34,7 +34,27 @@ Please see environment/README.md for guide on installing/setting up environment 
 
 ## Progress (3/10/2026)
 
-* AWT PROG
+ * Added supporting directories for logs, results/metadata, results/raw_fastq, results/star_index, results/deseq2, results/figures, and results/qc/{raw,trimmed}.
+
+ * Confirmed the public study identifiers and scoped the project around the sepsis-induced minipig RNA-seq dataset.
+
+ * Downloaded SRA Run Selector metadata for the study.
+
+ * Created a script to convert the raw SRA metadata export into a clean config/samples.tsv.
+
+ * Generated and validated samples.tsv with 54 samples across 9 regions, with 3 WT and 3 KO per region.
+
+ * Set up a config/test_samples.tsv for controlled test runs before scaling.
+
+ * Verified that the download script correctly converted SRA data to gzipped paired-end FASTQ files and cleaned temp/cache files afterward.
+
+ * Confirmed the naming scheme for downloaded files matched the cleaned sample metadata.
+
+ * Wrote and ran the raw FastQC step on the 2 test samples.
+
+ * Verified FastQC produced the expected HTML and ZIP reports in results/qc/raw.
+
+ * Added a .gitignore strategy to keep raw sequencing data, SRA files, cache/temp files, and large intermediates out of GitHub.
 
 ### License:
 
