@@ -1,0 +1,3 @@
+sample_id	run_accession	genotype	region	replicate	layout
+TA_WT_3	SRR31045382	WT	TA	3	PE
+TA_ZBED6_KO_1	SRR31045383	KO	TA	1	PE

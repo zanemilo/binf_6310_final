@@ -102,6 +102,8 @@ local.properties
 *.dll
 *.dylib
 *.exe
+
+
 cmake-build-*/
 CMakeFiles/
 CMakeCache.txt
@@ -110,4 +112,35 @@ Makefile
 # R
 *.RData
 *.Rhistory
+
+# Raw sequencing data
+*.fastq
+*.fastq.gz
+*.fq
+*.fq.gz
+*.sra
+
+# Alignment / large intermediates
+*.bam
+*.bai
+*.sam
+
+# Temporary / cache
+results/raw_fastq/
+results/sra_cache/
+results/tmp/
+tmp/
+*.tmp
+
+# Logs
+logs/*.log
+
+# macOS / editor
+.DS_Store
+
+results/qc/raw/*.html
+results/qc/raw/*.zip
+results/qc/trimmed/*.html
+results/qc/trimmed/*.zip
+
 
