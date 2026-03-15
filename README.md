@@ -14,7 +14,7 @@
 
 ## Time line
 
-![Gantt chart](images/6310_gantt.png)
+![Gantt chart](images/6310_gantt_2.png)
 
 
 ## **Pre-requisites**
