@@ -1,0 +1,202 @@
+#Pipeline
+#1Download (prefetch)
+#2Convert (fasterq-dump)
+#3Rename and compress (pigz)
+#4Cleanup (SRA deleted)
+#5FastQC
+#6Trimming (if needed)
+#7STAR index build
+#8STAR alignment
+#9featureCounts
+
+
+#Setup (SRAtoolkit, fastqc, and samtools already in .bashrc)
+sib #srun --time=16:00:00 --ntasks=1 --nodes=1 --mem=128G --cpus-per-task=46 --partition=courses --pty bash
+tmux new -s pipeline #starts a protected session to run on hpc in case laptop shutsdown
+module load anaconda3
+conda activate binf6310
+cd /scratch/polyak.i/ildiko_pipeline
+export SCRATCH_DIR=/scratch/polyak.i/ildiko_pipeline #Sets the root location of your whole pipeline workspace. Everything else is built on top of this path
+export OUTDIR="${SCRATCH_DIR}/results/raw_fastq" #Where downloaded FASTQ files get saved. Tools that need to find your raw data look here.
+export SRA_CACHE_DIR="${SCRATCH_DIR}/results/sra_cache" #Where prefetch puts the temporary .sra files during download.
+export LOGDIR="${SCRATCH_DIR}/logs" #Where all log files get saved so you can review what happened if something goes wrong.
+export THREADS=46 #Number of CPUs you can pass to tools that support parallelization.
+echo $SCRATCH_DIR #verification commands
+echo $OUTDIR
+echo $THREADS
+conda info | grep "active env"
+
+#Start Download
+prefetch SRR31045383 \
+    --output-directory $SRA_CACHE_DIR \
+    2>&1 | tee $LOGDIR/prefetch.log && echo "DONE - prefetch complete"
+
+#Convert to FASTQ
+fasterq-dump $SRA_CACHE_DIR/SRR31045383 \
+    --split-files \
+    --threads $THREADS \
+    --outdir $OUTDIR \
+    --temp /tmp \
+    2>&1 | tee $LOGDIR/fasterq_dump.log && echo "DONE - fasterq-dump complete"
+
+#Rename and compress with pigz
+mv $OUTDIR/SRR31045383_1.fastq $OUTDIR/TIP_WT_1_R1.fastq
+mv $OUTDIR/SRR31045383_2.fastq $OUTDIR/TIP_WT_1_R2.fastq && echo "DONE - rename complete"
+pigz -p $THREADS $OUTDIR/TIP_WT_1_R1.fastq && echo "DONE - R1 compression complete"
+pigz -p $THREADS $OUTDIR/TIP_WT_1_R2.fastq && echo "DONE - R2 compression complete"
+
+#Verify files look right
+ls -lh $OUTDIR && echo "DONE - verification complete"
+
+#delete the SRA file since we no longer need it and verify it's gone
+rm -rf $SRA_CACHE_DIR/SRR31045383 && echo "DONE - SRA cache cleared"
+ls -lh $SRA_CACHE_DIR3
+
+#Run FASTQC
+fastqc \
+    --threads $THREADS \
+    --outdir /scratch/polyak.i/ildiko_pipeline/results/qc/raw \
+    $OUTDIR/TIP_WT_1_R1.fastq.gz \
+    $OUTDIR/TIP_WT_1_R2.fastq.gz \
+    2>&1 | tee $LOGDIR/fastqc_raw.log && echo "DONE - FastQC complete"
+
+
+#Download FASTQC reports
+#Open new WSL Ubuntu terminal window
+scp explorer:/scratch/polyak.i/ildiko_pipeline/results/qc/raw/TIP_WT_1_R1_fastqc.html ~/
+scp explorer:/scratch/polyak.i/ildiko_pipeline/results/qc/raw/TIP_WT_1_R2_fastqc.html ~/
+#Open them in browser
+explorer.exe TIP_WT_1_R1_fastqc.html
+explorer.exe TIP_WT_1_R2_fastqc.html
+
+#Look at summary statistics in FASTQC report
+#R1 and R2 for TIP WT 1: data is high quality and ready for alignment. You do not need to trim these reads before running STAR. The three non-green flags are all expected artifacts of RNA-seq library preparation and biology, not actual data quality problems.
+
+#Back to main session ubuntu window
+#download the reference genome and annotation files ourselves directly from Ensembl
+
+#Create new directory for it
+mkdir -p /scratch/polyak.i/ildiko_pipeline/reference
+cd /scratch/polyak.i/ildiko_pipeline/reference
+
+#Download the genome FASTA - actual DNA sequence
+wget -c "https://ftp.ensembl.org/pub/release-113/fasta/sus_scrofa/dna/Sus_scrofa.Sscrofa11.1.dna.toplevel.fa.gz" \
+    -O /scratch/polyak.i/ildiko_pipeline/reference/Sus_scrofa.Sscrofa11.1.dna.toplevel.fa.gz \
+    2>&1 | tee $LOGDIR/genome_download.log && echo "DONE - genome download complete"
+#This is a large file — around 800MB — so it will take a few minutes. The -c flag means if it gets interrupted it can resume where it left off.
+
+#Download GTF annotation - gene coordinates
+wget -c "https://ftp.ensembl.org/pub/release-113/gtf/sus_scrofa/Sus_scrofa.Sscrofa11.1.113.gtf.gz" \
+    -O /scratch/polyak.i/ildiko_pipeline/reference/Sus_scrofa.Sscrofa11.1.113.gtf.gz \
+    2>&1 | tee $LOGDIR/gtf_download.log && echo "DONE - GTF download complete"
+
+#Verify
+ls -lh /scratch/polyak.i/ildiko_pipeline/reference/
+
+#Build STAR genome index
+#create directory
+mkdir -p /scratch/polyak.i/ildiko_pipeline/results/star_index
+
+
+#Explorer has the newest version of STAR v2.7.11b, but we need to match paper for reproducibility START v2.7.6a
+
+#Decompress:  STAR v2.7.6a doesn't support compressed genome files — it needs the uncompressed FASTA and GTF files
+cd /scratch/polyak.i/ildiko_pipeline/reference/
+gunzip Sus_scrofa.Sscrofa11.1.dna.toplevel.fa.gz && echo "DONE - genome decompressed"
+gunzip Sus_scrofa.Sscrofa11.1.113.gtf.gz && echo "DONE - GTF decompressed"
+
+#Verify
+ls -lh /scratch/polyak.i/ildiko_pipeline/reference/
+
+#Run the index
+STAR \
+    --runMode genomeGenerate \
+    --runThreadN $THREADS \
+    --genomeDir /scratch/polyak.i/ildiko_pipeline/results/star_index \
+    --genomeFastaFiles /scratch/polyak.i/ildiko_pipeline/reference/Sus_scrofa.Sscrofa11.1.dna.toplevel.fa \
+    --sjdbGTFfile /scratch/polyak.i/ildiko_pipeline/reference/Sus_scrofa.Sscrofa11.1.113.gtf \
+    --sjdbOverhang 149 \
+    2>&1 | tee $LOGDIR/star_index.log && echo "DONE - STAR index complete"
+
+#Verify
+ls -lh /scratch/polyak.i/ildiko_pipeline/results/star_index/
+#Notice the index is 24GB total — this is why we needed 128GB RAM! The SA file alone is 20GB.
+
+#Run the alignement
+#Make the directory
+mkdir -p /scratch/polyak.i/ildiko_pipeline/results/star_aligned
+
+#Run STAR
+STAR \
+    --runThreadN $THREADS \
+    --genomeDir /scratch/polyak.i/ildiko_pipeline/results/star_index \
+    --readFilesIn $OUTDIR/TIP_WT_1_R1.fastq.gz $OUTDIR/TIP_WT_1_R2.fastq.gz \
+    --readFilesCommand zcat \
+    --outSAMtype BAM SortedByCoordinate \
+    --outSAMattributes NH HI AS NM MD \
+    --outFileNamePrefix /scratch/polyak.i/ildiko_pipeline/results/star_aligned/TIP_WT_1_ \
+    2>&1 | tee $LOGDIR/star_align.log && echo "DONE - STAR alignment complete"
+
+#verify
+ls -lh /scratch/polyak.i/ildiko_pipeline/results/star_aligned/
+
+#Files created:
+#TIP_WT_1_Aligned.sortedByCoord.out.bam — your main output, 4.2GB, contains all 40 million reads aligned to the pig genome, sorted by chromosome position
+#TIP_WT_1_Log.final.out — summary statistics of the alignment — this is the most important one to check
+#TIP_WT_1_Log.out — detailed log of everything STAR did
+#TIP_WT_1_Log.progress.out — progress tracking during the run
+#TIP_WT_1_SJ.out.tab — splice junction information
+#TIP_WT_1__STARtmp/ — temporary folder, can be deleted
+
+#Look at alignment summary
+cat /scratch/polyak.i/ildiko_pipeline/results/star_aligned/TIP_WT_1_Log.final.out
+
+#alignment results are essentially matching what Liu et al. reported. The 94.92% vs >95% difference is negligible and could be due to the slightly different Ensembl release.
+
+#featureCounts
+#make directory
+mkdir -p /scratch/polyak.i/ildiko_pipeline/results/counts
+
+#before we run featureCounts we need to know the library strandedness. computational progress report mentioned it was found in the metadata
+cat /scratch/polyak.i/final_temp/binf_6310_final/config/samples.tsv | grep "TIP" | head -3
+
+#check SRA metadata
+cat /scratch/polyak.i/final_temp/binf_6310_final/config/samples.tsv | head -2
+
+#The samples.tsv only shows PE (paired-end) for layout — no strandedness information
+# library strandedness was found in the study's metadata link
+#https://www.ncbi.nlm.nih.gov/sra/SRR31045383
+#Random priming → unstranded, rRNA depletion → unstranded, no mention of strand-specific kit (like dUTP method which would indicate stranded) - This all points to unstranded (-s 0).
+
+#Run featureCounts
+featureCounts \
+    -T $THREADS \
+    -p \
+    --countReadPairs \
+    -s 0 \
+    -a /scratch/polyak.i/ildiko_pipeline/reference/Sus_scrofa.Sscrofa11.1.113.gtf \
+    -o /scratch/polyak.i/ildiko_pipeline/results/counts/TIP_WT_1_counts.txt \
+    /scratch/polyak.i/ildiko_pipeline/results/star_aligned/TIP_WT_1_Aligned.sortedByCoord.out.bam \
+    2>&1 | tee $LOGDIR/featurecounts.log && echo "DONE - featureCounts complete"
+
+#This is a good assignment rate for RNA-seq data:
+#Total alignments: 20,160,951 — the number of read pairs processed
+#Successfully assigned: 17,835,056 (88.5%) — reads that mapped to a gene feature
+
+#Verify raw count file
+head -20 /scratch/polyak.i/ildiko_pipeline/results/counts/TIP_WT_1_counts.txt
+
+#Look at gene ID and counts
+cut -f1,7 /scratch/polyak.i/ildiko_pipeline/results/counts/TIP_WT_1_counts.txt | head -20
+
+#how many genes counted in total 
+wc -l /scratch/polyak.i/ildiko_pipeline/results/counts/TIP_WT_1_counts.txt
+
+#how many genes have at least 1 read (are expressed)
+awk '$7 > 0' /scratch/polyak.i/ildiko_pipeline/results/counts/TIP_WT_1_counts.txt | wc -l
+
+
+
+
+ 
+
