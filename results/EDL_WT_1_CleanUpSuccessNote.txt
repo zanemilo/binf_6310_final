@@ -1,0 +1,3 @@
+#Before SortMeRNA: Unique mapping: 79.49%   Multi-mapping: 15.67%
+#After SortMeRNA:  Unique mapping: 95.70%   Successfully assigned reads: 83.8%
+#The assignment rate of 83.8% is slightly lower than other samples (~88.5%) but that's expected since we removed some reads during rRNA filtering. Overall this is a very good result.
