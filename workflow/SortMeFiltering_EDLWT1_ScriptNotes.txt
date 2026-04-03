@@ -1,0 +1,154 @@
+#SortMeRNA used to clean EDL_WT_1 and then clean reads aligned with STAR and featureCounts
+
+
+#SortMeRNA — specifically designed to identify and remove rRNA reads. Requires rRNA reference databases to match against. Very accurate but can be slow and requires database setup.
+
+#Check conda for SortMeRNA
+conda search -c bioconda sortmerna | tail -5
+conda search -c bioconda bbtools | tail -5
+
+#Install SortMeRNA
+conda activate binf6310
+conda install -c bioconda sortmerna=4.3.4 -y && echo "DONE"
+
+
+#Test version
+sortmerna --version
+
+#Download SortMeRNA reference databases separately
+#Create directory
+mkdir -p /scratch/polyak.i/ildiko_pipeline_automatic/sortmerna_db
+cd /scratch/polyak.i/ildiko_pipeline_automatic/sortmerna_db
+wget https://raw.githubusercontent.com/biocore/sortmerna/master/data/rRNA_databases/silva-euk-28s-id98.fasta
+wget https://raw.githubusercontent.com/biocore/sortmerna/master/data/rRNA_databases/silva-euk-18s-id95.fasta
+wget https://raw.githubusercontent.com/biocore/sortmerna/master/data/rRNA_databases/silva-bac-23s-id98.fasta
+wget https://raw.githubusercontent.com/biocore/sortmerna/master/data/rRNA_databases/silva-bac-16s-id90.fasta
+
+#The 28S database is the most important one since BLAST identified 28S rRNA as the contaminant
+
+#Create output directory
+mkdir -p /scratch/polyak.i/ildiko_pipeline_automatic/results/sortmerna/EDL_WT_1
+
+#SortMeRNA is computational heavy, so we need to use the 46CPUS or it will run for eternity
+
+nano /scratch/polyak.i/ildiko_pipeline_automatic/sortmerna_EDL_WT_1.sh
+
+#!/usr/bin/env bash
+#SBATCH --job-name=sortmerna_EDL
+#SBATCH --partition=courses
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=46
+#SBATCH --mem=128G
+#SBATCH --time=04:00:00
+#SBATCH --output=/scratch/polyak.i/ildiko_pipeline_automatic/logs/sortmerna_EDL_WT_1_%j.log
+
+export PATH=/home/polyak.i/micromamba/envs/binf6310/bin:$PATH
+
+mkdir -p /scratch/polyak.i/ildiko_pipeline_automatic/results/sortmerna/EDL_WT_1
+
+sortmerna \
+    --ref /scratch/polyak.i/ildiko_pipeline_automatic/sortmerna_db/silva-euk-28s-id98.fasta \
+    --ref /scratch/polyak.i/ildiko_pipeline_automatic/sortmerna_db/silva-euk-18s-id95.fasta \
+    --ref /scratch/polyak.i/ildiko_pipeline_automatic/sortmerna_db/silva-bac-23s-id98.fasta \
+    --ref /scratch/polyak.i/ildiko_pipeline_automatic/sortmerna_db/silva-bac-16s-id90.fasta \
+    --reads /scratch/polyak.i/ildiko_pipeline_automatic/results/raw_fastq/EDL_WT_1_R1.fastq.gz \
+    --reads /scratch/polyak.i/ildiko_pipeline_automatic/results/raw_fastq/EDL_WT_1_R2.fastq.gz \
+    --fastx \
+    --paired_in \
+    --out2 \
+    --other /scratch/polyak.i/ildiko_pipeline_automatic/results/sortmerna/EDL_WT_1/EDL_WT_1_clean \
+    --workdir /scratch/polyak.i/ildiko_pipeline_automatic/results/sortmerna/EDL_WT_1 \
+    --threads 46 \
+    2>&1 && echo "DONE - SortMeRNA complete"
+
+
+
+
+#Run SortmeRNA script
+sbatch /scratch/polyak.i/ildiko_pipeline_automatic/sortmerna_EDL_WT_1.sh
+
+#Check that it's running
+squeue -u polyak.i
+tail -f /scratch/polyak.i/ildiko_pipeline_automatic/logs/sortmerna_EDL_WT_1_5624902.log
+
+#Even with 46CPUs, it will take about 1.5 hours
+
+#Check output and clean output file
+ls -lh /scratch/polyak.i/ildiko_pipeline_automatic/results/sortmerna/EDL_WT_1/out/
+ls -lh /scratch/polyak.i/ildiko_pipeline_automatic/results/sortmerna/EDL_WT_1/EDL_WT_1_clean*
+
+#2 sets of files:
+#aligned_fwd/rev — the rRNA reads that were REMOVED (1GB total)
+#EDL_WT_1_clean_fwd/rev — the clean reads we'll use for alignment (4.3GB total)
+#The original files were 2.2GB + 2.6GB = 4.8GB. The clean files are 1.9GB + 2.4GB = 4.3GB — meaning about 0.5GB of rRNA contamination was removed
+
+#check the aligned.log to see what percentage of reads were identified as rRNA
+cat /scratch/polyak.i/ildiko_pipeline_automatic/results/sortmerna/EDL_WT_1/out/aligned.log
+
+#key numbers from the log that show significant contamination:
+#21.67% of reads identified as rRNA — removed
+#78.33% of reads passed — kept as clean reads
+#The contamination was primarily 28S rRNA (13.72%) and 18S rRNA (7.82%) — both eukaryotic, consistent with NCBI BLAST finding
+
+#Realign the clean reads with STAR and see if mapping rate improves
+
+nano /scratch/polyak.i/ildiko_pipeline_automatic/star_EDL_WT_1_clean.sh
+
+
+#!/usr/bin/env bash
+#SBATCH --job-name=star_EDL_clean
+#SBATCH --partition=courses
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=46
+#SBATCH --mem=128G
+#SBATCH --time=04:00:00
+#SBATCH --output=/scratch/polyak.i/ildiko_pipeline_automatic/logs/star_EDL_WT_1_clean_%j.log
+
+export PATH=/home/polyak.i/micromamba/envs/binf6310/bin:$PATH
+
+STAR \
+    --runThreadN 46 \
+    --genomeDir /scratch/polyak.i/ildiko_pipeline_automatic/results/star_index \
+    --readFilesIn \
+        /scratch/polyak.i/ildiko_pipeline_automatic/results/sortmerna/EDL_WT_1/EDL_WT_1_clean_fwd.fq.gz \
+        /scratch/polyak.i/ildiko_pipeline_automatic/results/sortmerna/EDL_WT_1/EDL_WT_1_clean_rev.fq.gz \
+    --readFilesCommand zcat \
+    --outSAMtype BAM SortedByCoordinate \
+    --outSAMattributes NH HI AS NM MD \
+    --outFileNamePrefix /scratch/polyak.i/ildiko_pipeline_automatic/results/star_aligned/EDL_WT_1_ \
+    2>&1 && echo "DONE - STAR alignment complete"
+
+
+#Sumbit the script to run STAR on clean reads
+sbatch /scratch/polyak.i/ildiko_pipeline_automatic/star_EDL_WT_1_clean.sh
+
+#Check new mapping rate: 95.7% uniquely mapped rates
+cat /scratch/polyak.i/ildiko_pipeline_automatic/results/star_aligned/EDL_WT_1_Log.final.out | grep "Uniquely mapped reads %"
+
+#Before SortMeRNA: 79.49%   After SortMeRNA: 95.70%
+#now consistent with all other samples and with what Figure 2a shows in the paper
+
+#Delete old counts
+rm -f /scratch/polyak.i/ildiko_pipeline_automatic/results/counts/EDL_WT_1_counts.txt
+rm -f /scratch/polyak.i/ildiko_pipeline_automatic/results/counts/EDL_WT_1_counts.txt.summary
+
+#Run featureCounts on the new clean BAM file to get updated counts for EDL_WT_1
+conda activate binf6310
+featureCounts \
+    -T 16 \
+    -p \
+    --countReadPairs \
+    -s 0 \
+    -a /scratch/polyak.i/ildiko_pipeline_automatic/reference/Sus_scrofa.Sscrofa11.1.113.gtf \
+    -o /scratch/polyak.i/ildiko_pipeline_automatic/results/counts/EDL_WT_1_counts.txt \
+    /scratch/polyak.i/ildiko_pipeline_automatic/results/star_aligned/EDL_WT_1_Aligned.sortedByCoord.out.bam \
+    2>&1 | tee /scratch/polyak.i/ildiko_pipeline_automatic/logs/featurecounts_EDL_WT_1.log && echo "DONE - featureCounts complete"
+
+
+#Before SortMeRNA: Unique mapping: 79.49%   Multi-mapping: 15.67%
+#After SortMeRNA:  Unique mapping: 95.70%   Successfully assigned reads: 83.8%
+#The assignment rate of 83.8% is slightly lower than other samples (~88.5%) but that's expected since we removed some reads during rRNA filtering. Overall this is a very good result.
+
+#Delete the BAM file since pipeline script normally does that after featureCounts
