@@ -12,9 +12,7 @@
 
 - Ildiko Polyak
 
-## Time line
-
-![Gantt chart](images/6310_gantt_2.png)
+![Jittered DEG fold-change plot by tissue](results/figures/tissue_up_down_plot.png)
 
 
 ## **Pre-requisites**

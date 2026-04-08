@@ -1,7 +1,7 @@
 # Add files and directories to ignore
 *.mp4
 *.mov
-
+*.zip
 # OS
 .DS_Store
 .DS_Store?
