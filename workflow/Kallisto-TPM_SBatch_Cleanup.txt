@@ -1,0 +1,305 @@
+#Install Kallisto v0.44.0
+conda activate binf6310
+conda install -c bioconda kallisto=0.44.0 -y && echo "DONE - Kallisto installed"
+
+#pig transcriptome FASTA file to build the Kallisto index
+#different from what we used for STAR — we need the transcript sequences, not the genome sequence
+#download it from Ensembl release 113 to match our GTF
+
+mkdir -p /scratch/polyak.i/ildiko_pipeline_automatic/reference/kallisto
+cd /scratch/polyak.i/ildiko_pipeline_automatic/reference/kallisto
+
+wget -c "https://ftp.ensembl.org/pub/release-113/fasta/sus_scrofa/cdna/Sus_scrofa.Sscrofa11.1.cdna.all.fa.gz" \
+    -O Sus_scrofa.Sscrofa11.1.cdna.all.fa.gz && echo "DONE - transcriptome downloaded"
+
+#Build Kallisto Index
+kallisto index \
+    -i /scratch/polyak.i/ildiko_pipeline_automatic/reference/kallisto/Sus_scrofa.Sscrofa11.1.cdna.all.index \
+    Sus_scrofa.Sscrofa11.1.cdna.all.fa.gz \
+    2>&1 | tee /scratch/polyak.i/ildiko_pipeline_automatic/logs/kallisto_index.log && echo "DONE - Kallisto index complete"
+
+#Write Kallisto batch script
+#1.  download each sample FASTQ file since they were deleted after featureCounts
+#2.  run Kallisto quant to get TPM values
+#3.  clean up FASTQ files after to save space
+
+nano /scratch/polyak.i/ildiko_pipeline_automatic/kallisto_pipeline.sh
+
+#!/usr/bin/env bash
+#SBATCH --job-name=kallisto_pipeline
+#SBATCH --partition=courses
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=46
+#SBATCH --mem=128G
+#SBATCH --time=20:00:00
+#SBATCH --output=/scratch/polyak.i/ildiko_pipeline_automatic/logs/kallisto_pipeline_%j.log
+
+export PATH=/home/polyak.i/micromamba/envs/binf6310/bin:$PATH
+
+set -euo pipefail
+
+SCRATCH_DIR=/scratch/polyak.i/ildiko_pipeline_automatic
+SRA_CACHE_DIR="${SCRATCH_DIR}/results/sra_cache"
+KALLISTO_OUT="${SCRATCH_DIR}/results/kallisto"
+LOGDIR="${SCRATCH_DIR}/logs"
+INDEX="${SCRATCH_DIR}/reference/kallisto/Sus_scrofa.Sscrofa11.1.cdna.all.index"
+THREADS=46
+SAMPLES_TSV="${1:-}"
+
+if [[ -z "$SAMPLES_TSV" ]]; then
+    echo "ERROR: No samples TSV file provided."
+    echo "Usage: sbatch kallisto_pipeline.sh all_samples.tsv"
+    exit 1
+fi
+
+mkdir -p "$SRA_CACHE_DIR" "$KALLISTO_OUT" "$LOGDIR"
+
+echo "Starting Kallisto pipeline..."
+
+while IFS=$'\t' read -r sample_id run_accession genotype region replicate layout; do
+
+    [[ "$sample_id" == "sample_id" ]] && continue
+
+    echo ""
+    echo "Processing: $sample_id ($run_accession)"
+
+    SAMPLE_OUT="${KALLISTO_OUT}/${sample_id}"
+
+    if [[ -f "${SAMPLE_OUT}/abundance.tsv" ]]; then
+        echo "[skip] Kallisto output already exists for $sample_id"
+        continue
+    fi
+
+    mkdir -p "$SAMPLE_OUT"
+
+    # Step 1: Download
+    echo "[step 1] Downloading $run_accession..."
+    prefetch "$run_accession" \
+        --output-directory "$SRA_CACHE_DIR" \
+        2>&1 | tee "$LOGDIR/prefetch_kallisto_${sample_id}.log"
+
+    # Step 2: Convert to FASTQ
+    echo "[step 2] Converting to FASTQ..."
+    fasterq-dump "${SRA_CACHE_DIR}/${run_accession}" \
+        --split-files \
+        --threads "$THREADS" \
+        --outdir "$SAMPLE_OUT" \
+        --temp /tmp \
+        2>&1 | tee "$LOGDIR/fasterq_kallisto_${sample_id}.log"
+
+    # Step 3: Run Kallisto
+    echo "[step 3] Running Kallisto..."
+    kallisto quant \
+        -i "$INDEX" \
+        -o "$SAMPLE_OUT" \
+        -t "$THREADS" \
+        "${SAMPLE_OUT}/${run_accession}_1.fastq" \
+        "${SAMPLE_OUT}/${run_accession}_2.fastq" \
+        2>&1 | tee "$LOGDIR/kallisto_${sample_id}.log"
+    echo "DONE - Kallisto complete for $sample_id"
+
+    # Step 4: Cleanup
+    echo "[step 4] Cleaning up..."
+    rm -f "${SAMPLE_OUT}/${run_accession}_1.fastq"
+    rm -f "${SAMPLE_OUT}/${run_accession}_2.fastq"
+    rm -rf "${SRA_CACHE_DIR}/${run_accession}"
+    echo "DONE - Cleanup complete for $sample_id"
+
+    echo "COMPLETED: $sample_id"
+
+done < "$SAMPLES_TSV"
+
+echo ""
+echo "All samples complete."
+echo "Kallisto output: $KALLISTO_OUT"
+
+
+
+#Submit the job
+chmod +x /scratch/polyak.i/ildiko_pipeline_automatic/kallisto_pipeline.sh
+
+sbatch /scratch/polyak.i/ildiko_pipeline_automatic/kallisto_pipeline.sh \
+    /scratch/polyak.i/ildiko_pipeline_automatic/all_samples.tsv
+
+#Check that it's running
+squeue -u polyak.i
+
+#Watch the log to confirm it's running
+tail -f /scratch/polyak.i/ildiko_pipeline_automatic/logs/kallisto_pipeline_5925523.log
+
+#Let the script run overnight and confirm in the morning
+
+#check if the job is done
+ssh explorer
+squeue -u polyak.i
+
+#check all 54 folders are there
+ls /scratch/polyak.i/ildiko_pipeline_automatic/results/kallisto/ | wc -l
+
+#look at EDL_WT_1's TPM output
+head -20 /scratch/polyak.i/ildiko_pipeline_automatic/results/kallisto/EDL_WT_1/abundance.tsv
+
+#check the Kallisto run log for EDL_WT_1 and see how many reads were pseudoaligned
+cat /scratch/polyak.i/ildiko_pipeline_automatic/logs/kallisto_EDL_WT_1.log
+
+#key is to look for pseudoalignment rate and for all other samples expect around 90%
+#Kallisto pseudoalignment rate for EDL_WT_1:
+#processed 23,585,303 reads
+#pseudoalignment 17,589,296 reads
+#rate = 17,589,296 / 23,585,202 x 100 = 74.6%
+#Kallisto's pseudoalignment rate of 74.6% is lower than STAR's alignment rate of 79.49% on the raw unfiltered reads.  This makes sense because Kallisto aligns against the transcriptome only, so rRNA reads that don't match any transcript fail to pseudoalign.
+
+#compare EDL_WT_1 to other samples to see if it is an outlier
+
+#check pseudoaligned read counts
+for f in /scratch/polyak.i/ildiko_pipeline_automatic/logs/kallisto_*.log; do
+    sample=$(basename $f .log | sed 's/kallisto_//')
+    rate=$(grep "reads pseudoaligned" $f | awk '{print $4, $5, $6, $7, $8}')
+    echo "$sample: $rate"
+done
+
+
+#check total processed reads to calculate percentages
+for f in /scratch/polyak.i/ildiko_pipeline_automatic/logs/kallisto_*.log; do
+    sample=$(basename $f .log | sed 's/kallisto_//')
+    line=$(grep "reads pseudoaligned" $f)
+    processed=$(echo $line | awk '{print $3}' | tr -d ',')
+    aligned=$(echo $line | awk '{print $5}' | tr -d ',')
+    if [[ -n "$processed" && "$processed" -gt 0 ]]; then
+        pct=$(echo "scale=1; $aligned * 100 / $processed" | bc)
+        echo "$sample: $pct%"
+    fi
+done
+
+#ALL 53 SAMPLES HAVE PSEUDOALIGNMENT RATES 84.4% - 91.0% (MATCHES PAPER) EXCEPT FOR EDL_WT_1 IS 74.5%
+#This confirms that the rRNA contamination in EDL_WT_1 affects Kallisto pseudoalignment just as it affected STAR alignment.  The 10 percentage point drop is consistent with the 21% rRNA contamination identified earlier in STAR, not all rRNA reads fail pseudoalignment, some partially match transcript
+
+#1. The Kallisto pseudoalignment rate for EDL_WT_1 was 74.5% compared to 84-91% for all other 53 samples, consistent with the rRNA contamination identified in FastQC and STAR alignment analysis.
+#2. Since the paper does not report Kallisto pseudoalignment rates, we can't directly confirm whether the authos observed a similar drop for EDL_WT_1.  However, if rRNA filtering was not applied prior to Kallisto, the TPM values for EDL_WT_1 would be derived from a contaminated dataset, potentially affecting the TPM based figures including t-SNE, Spearman correlation, and the expression heatmap
+#3. The lower pseudoalignment rate for EDL_WT_1 provides additional evidence that an undocumented preprocessing step was applied by the authors.  If no rRNA filtering had been performed, a similar pseudoalignment rate reduction would be expected in the paper's own Kallisto results, yet Figure 2a suggests all samples achieved consistent mapping rates.
+
+#Suggest making 2 versions of Figure 2a for final report to directly demonstrate impact of undocumented preprocessing step:
+#Version 1:  All 54 samples unfiltered - EDL_WT_1 drops below 95% line
+#Version 2:  All 54 samples with EDL_WT_1 rRNA filtered - all samples above 95%
+#Need STAR alignment rates for all 54 samples and the cleaned up SortMeRNA reads
+
+
+#ALL 53 SAMPLES HAVE PSEUDOALIGNMENT RATES 84.4% - 91.0% (MATCHES PAPER) EXCEPT FOR EDL_WT_1 IS 74.5%
+#This confirms that the rRNA contamination in EDL_WT_1 affects Kallisto pseudoalignment just as it affected STAR alignment.  The 10 percentage point drop is consistent with the 21% rRNA contamination identified earlier in STAR, not all rRNA reads fail pseudoalignment, some partially match transcript
+
+#1. The Kallisto pseudoalignment rate for EDL_WT_1 was 74.5% compared to 84-91% for all other 53 samples, consistent with the rRNA contamination identified in FastQC and STAR alignment analysis.
+#2. Since the paper does not report Kallisto pseudoalignment rates, we can't directly confirm whether the authos observed a similar drop for EDL_WT_1.  However, if rRNA filtering was not applied prior to Kallisto, the TPM values for EDL_WT_1 would be derived from a contaminated dataset, potentially affecting the TPM based figures including t-SNE, Spearman correlation, and the expression heatmap
+#3. The lower pseudoalignment rate for EDL_WT_1 provides additional evidence that an undocumented preprocessing step was applied by the authors.  If no rRNA filtering had been performed, a similar pseudoalignment rate reduction would be expected in the paper's own Kallisto results, yet Figure 2a suggests all samples achieved consistent mapping rates.
+
+#Suggest making 2 versions of Figure 2a for final report to directly demonstrate impact of undocumented preprocessing step:
+#Version 1:  All 54 samples unfiltered - EDL_WT_1 drops below 95% line
+#Version 2:  All 54 samples with EDL_WT_1 rRNA filtered - all samples above 95%
+#Need STAR alignment rates for all 54 samples and the cleaned up SortMeRNA reads
+
+
+#Kallisto Cleanup:  run Kallisto on the rRNA-filtered EDL_WT_1 reads from SortMeRNA that we ran earlier for STAR
+ 
+#Check if it's still there
+ls -lh /scratch/polyak.i/ildiko_pipeline_automatic/results/sortmerna/EDL_WT_1/
+
+#Run Kallisto on the reads as a batch job
+nano /scratch/polyak.i/ildiko_pipeline_automatic/kallisto_EDL_WT_1_filtered.sh
+
+#!/usr/bin/env bash
+#SBATCH --job-name=kallisto_EDL_filtered
+#SBATCH --partition=courses
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=46
+#SBATCH --mem=128G
+#SBATCH --time=01:00:00
+#SBATCH --output=/scratch/polyak.i/ildiko_pipeline_automatic/logs/kallisto_EDL_WT_1_filtered_%j.log
+
+export PATH=/home/polyak.i/micromamba/envs/binf6310/bin:$PATH
+
+INDEX=/scratch/polyak.i/ildiko_pipeline_automatic/reference/kallisto/Sus_scrofa.Sscrofa11.1.cdna.all.index
+FWD=/scratch/polyak.i/ildiko_pipeline_automatic/results/sortmerna/EDL_WT_1/EDL_WT_1_clean_fwd.fq.gz
+REV=/scratch/polyak.i/ildiko_pipeline_automatic/results/sortmerna/EDL_WT_1/EDL_WT_1_clean_rev.fq.gz
+OUT=/scratch/polyak.i/ildiko_pipeline_automatic/results/kallisto/EDL_WT_1_filtered
+
+mkdir -p "$OUT"
+
+kallisto quant \
+    -i "$INDEX" \
+    -o "$OUT" \
+    -t 46 \
+    "$FWD" "$REV" \
+    2>&1 && echo "DONE - Kallisto filtered EDL_WT_1 complete"
+
+
+
+#Run the job and check job ID
+chmod +x /scratch/polyak.i/ildiko_pipeline_automatic/kallisto_EDL_WT_1_filtered.sh
+sbatch /scratch/polyak.i/ildiko_pipeline_automatic/kallisto_EDL_WT_1_filtered.sh
+
+#Check results
+cat /scratch/polyak.i/ildiko_pipeline_automatic/logs/kallisto_EDL_WT_1_filtered_5934038.log
+
+#Calculate the rates
+#Version		Reads Processed	Pseudoaligned	Rate
+#Unfiltered (raw)	23,585,303	17,589,296	74.5%
+#rRNA-filtered		18,329,254	15,804,010	86.2%
+#Other 53 samples					84-91%
+
+#After rRNA filtering, EDL_WT_1 pseudoalignment rate of 86.2% falls withing the normal range for other samples and TPM values from filtered run are now comparable and reliable
+
+#Keep both clean and raw-unfiltered versions, clearly labeled
+cp /scratch/polyak.i/ildiko_pipeline_automatic/results/kallisto/EDL_WT_1/abundance.tsv \
+   /scratch/polyak.i/ildiko_pipeline_automatic/results/kallisto/EDL_WT_1/abundance_unfiltered.tsv
+
+cp /scratch/polyak.i/ildiko_pipeline_automatic/results/kallisto/EDL_WT_1_filtered/abundance.tsv \
+   /scratch/polyak.i/ildiko_pipeline_automatic/results/kallisto/EDL_WT_1/abundance_filtered.tsv
+
+#Verify both files
+ls -lh /scratch/polyak.i/ildiko_pipeline_automatic/results/kallisto/EDL_WT_1/
+
+#Replace main abundance.tsv with filtered version
+cp /scratch/polyak.i/ildiko_pipeline_automatic/results/kallisto/EDL_WT_1/abundance_filtered.tsv \
+   /scratch/polyak.i/ildiko_pipeline_automatic/results/kallisto/EDL_WT_1/abundance.tsv
+
+#Verify file
+ls -lh /scratch/polyak.i/ildiko_pipeline_automatic/results/kallisto/EDL_WT_1/
+
+
+#sync GitHub
+cd /scratch/polyak.i/final_temp/binf_6310_final/
+git pull origin master
+git status
+
+#create kallisto folder in results
+mkdir -p results/kallisto
+touch results/kallisto/.gitkeep
+
+#Copy 54 sample abundance files
+for dir in /scratch/polyak.i/ildiko_pipeline_automatic/results/kallisto/*/; do
+    sample=$(basename $dir)
+    if [[ "$sample" != "EDL_WT_1_filtered" ]]; then
+        mkdir -p results/kallisto/$sample
+        cp $dir/abundance.tsv results/kallisto/$sample/abundance.tsv
+    fi
+done
+
+#Verify
+ls results/kallisto/ | wc -l
+
+#Commit and push to GitHub
+git add results/kallisto/
+git commit -m "Add Kallisto TPM abundance files for all 54 samples (EDL_WT_1 rRNA-filtered)"
+git push origin master
+
+
+#Make new folder for unfiltered EDL_WT_1 sample
+mkdir -p results/kallisto_unfiltered/EDL_WT_1
+cp /scratch/polyak.i/ildiko_pipeline_automatic/results/kallisto/EDL_WT_1/abundance_unfiltered.tsv \
+   results/kallisto_unfiltered/EDL_WT_1/abundance.tsv
+
+#Commit and push to GitHub
+git add results/kallisto_unfiltered/
+git commit -m "Add EDL_WT_1 unfiltered Kallisto abundance in separate folder for comparison figures"
+git push origin master
