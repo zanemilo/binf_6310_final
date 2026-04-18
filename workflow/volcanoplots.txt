@@ -1,0 +1,82 @@
+#pull latest from repo
+cd /scratch/polyak.i/binf_6310_final
+git pull origin master
+
+#Load R as a module
+module load R/4.4.1
+Rscript /scratch/polyak.i/volcano_plots.R
+
+#install ggplot2
+Rscript -e "install.packages('ggplot2', repos='https://cloud.r-project.org')"
+
+
+#R script for volcano plots for all 9 regions
+
+cat > /scratch/polyak.i/volcano_plots.R << 'EOF'
+library(ggplot2)
+
+regions <- c("TIP","BIP","RA","LD","PMM","SOL","GAS","EDL","TA")
+
+for (r in regions) {
+  message("Processing: ", r)
+  df <- read.csv(paste0("/scratch/polyak.i/binf_6310_final/results/counts/DESeq2_", r, "_results.csv"))
+  
+  df <- df[!is.na(df$padj) & !is.na(df$log2FoldChange), ]
+  df$neglog10padj <- -log10(df$padj)
+  df$status <- "Not Significant"
+  df$status[df$padj < 0.05 & df$log2FoldChange >= 1]  <- "Upregulated"
+  df$status[df$padj < 0.05 & df$log2FoldChange <= -1] <- "Downregulated"
+  df$status <- factor(df$status, levels = c("Upregulated","Downregulated","Not Significant"))
+
+  n_up   <- sum(df$status == "Upregulated")
+  n_down <- sum(df$status == "Downregulated")
+
+  x_limit <- 6
+  df$log2FoldChange_plot <- pmax(pmin(df$log2FoldChange, x_limit), -x_limit)
+
+  p <- ggplot(df, aes(x = log2FoldChange_plot, y = neglog10padj, color = status)) +
+    geom_point(alpha = 0.6, size = 1.2) +
+    scale_color_manual(values = c("Upregulated" = "#d62728",
+                                  "Downregulated" = "#1f77b4",
+                                  "Not Significant" = "grey70")) +
+    geom_vline(xintercept = c(-1, 1), linetype = "dashed", color = "black", linewidth = 0.4) +
+    geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "black", linewidth = 0.4) +
+    annotate("text", x = x_limit * 0.75, y = max(df$neglog10padj) * 0.95,
+             label = paste0("Up: ", n_up), color = "#d62728", hjust = 1, size = 4) +
+    annotate("text", x = -x_limit * 0.75, y = max(df$neglog10padj) * 0.95,
+             label = paste0("Down: ", n_down), color = "#1f77b4", hjust = 0, size = 4) +
+    xlim(-x_limit, x_limit) +
+    labs(title = paste0(r, " - KO vs WT"),
+         x = "log2(Fold Change)",
+         y = "-log10(adjusted p-value)",
+         color = "") +
+    theme_bw(base_size = 13) +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+          legend.position = "top")
+
+  ggsave(paste0("/scratch/polyak.i/binf_6310_final/results/figures/volcano_", r, ".pdf"),
+         plot = p, width = 7, height = 5)
+  message("Done: ", r)
+}
+EOF
+
+Rscript /scratch/polyak.i/volcano_plots.R
+Rscript /scratch/polyak.i/volcano_plots.R
+
+
+
+#Run it
+conda activate binf6310
+Rscript /scratch/polyak.i/volcano_plots.R
+
+#open pdf graphs
+scp explorer:/scratch/polyak.i/binf_6310_final/results/figures/volcano_*.pdf ~/
+
+#push to GitHub
+cd /scratch/polyak.i/binf_6310_final
+git add results/figures/volcano_*.pdf
+git commit -m "Add volcano plots for all 9 muscle regions (KO vs WT, DESeq2 results)"
+git push origin master
+
+
+
